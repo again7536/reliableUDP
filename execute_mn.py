@@ -43,7 +43,7 @@ def runMininet():
     Cleanup.cleanup()   #Cleaning up the Mininet before start
 
     "You can change the bottleneck link property by modifing these parameter"
-    myTopo = Assignment3Topo(bw_v = 10, delay_v="10ms", loss_v=10)  #make test network topology
+    myTopo = Assignment3Topo(bw_v = 10, delay_v="10ms", loss_v=1)  #make test network topology
     net = Mininet(topo=myTopo, link=TCLink) #make Mininet instance
     net.start()     #start Mininet
 

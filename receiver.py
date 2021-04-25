@@ -1,6 +1,5 @@
-import sys
 import socket
-import pdb
+import time
 from logHandler import logHandler
 
 def fileReceiver():
@@ -9,7 +8,6 @@ def fileReceiver():
     #########################
 
     #Write your Code here
-    logProc.startLogging("testRecvLogFile.txt")
 
     PKTSIZE = 1400
     curSeq = -1
@@ -18,13 +16,14 @@ def fileReceiver():
     isEOF = 0
     bodySize = 0
     file = ''
+    torigin = time.time()
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind(('0.0.0.0', 10080))
     
     while True:
         if isEOF == 1:
-            sock.settimeout(2)
+            sock.settimeout(1)
         
         #if timeout is set, error occur after waiting
         try:
@@ -35,16 +34,18 @@ def fileReceiver():
                 break
         
         #parse the packet
-        data = data.split(b'\n', 3)
+        data = data.split(b'\n', 4)
         pktSeq = int(data[0].decode())
         isEOF = int(data[1].decode())
         bodySize = int(data[2].decode())
-        body = data[3][:bodySize]
-        logProc.writePkt(0, f'recv {pktSeq} eof {isEOF}')
+        timestamp = float(data[3].decode())
+        body = data[4][:bodySize]
         
         #if it is the first packet, open file
         if curSeq == -1 and pktSeq == 0:
-            file = open(body.decode(), 'wb')
+            filename = body.decode()
+            file = open(filename, 'wb')
+            logProc.startLogging(f'{filename}_receiving_log.txt')
             curSeq += 1
             ackSeq = curSeq
         #in-order packet accept
@@ -57,6 +58,9 @@ def fileReceiver():
         else:
             ackSeq = pktSeq
         
+        if curSeq >= 0:
+            logProc.writePkt(pktSeq, 'received')
+        
         #duplicated but end of file
         if curSeq == pktSeq and isEOF == 1:
             isEOF = 1
@@ -66,16 +70,18 @@ def fileReceiver():
 
         #build ack
         ack = b''.join([str(ackSeq).encode(), b'\n',
-                        str(isEOF).encode(), b'\n']).ljust(1400, b'\0')
+                        str(isEOF).encode(), b'\n',
+                        str(timestamp).encode(), b'\n']).ljust(1400, b'\0')
 
         try:
             sock.sendto(ack, servAddr)
-            logProc.writeAck(1, f'ack {ackSeq}')
+            if ackSeq >= 0:
+                logProc.writeAck(ackSeq, 'sent')
         except: #when sender socket is closed
             file.close()
             break
     
-    logProc.writeEnd(10.123)
+    logProc.writeEnd(curSeq / (time.time() - torigin))
     #########################
 
 

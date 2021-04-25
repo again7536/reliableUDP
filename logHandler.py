@@ -27,7 +27,7 @@ class logHandler:
 
     def startLogging(self, filename):
         self.filename = filename
-        self.loggingProc = Process(target=logFileWorker, name='logFileWorker', args=(self.logQueue, self.endEvent, self.filename))
+        self.loggingProc = Process(target=logFileWorker, args=(self.logQueue, self.endEvent, self.filename))
         self.loggingProc.start()
         self.startTime = time()
         self.startflag = True
@@ -46,10 +46,12 @@ class logHandler:
         else:
             print("WARNING : logging has not been started!")
 
-    def writeEnd(self, throughput):
+    def writeEnd(self, throughput, avgRTT=-1):
         if self.startflag:
             self.logQueue.put('File transfer is finished.\n')
             self.logQueue.put('Throughput : {:.2f} pkts/sec\n'.format(throughput))
+            if avgRTT!=-1:
+                self.logQueue.put('Average RTT : {:.1f} ms\n'.format(avgRTT))
             self.endEvent.set()
             self.loggingProc.join()
         else:

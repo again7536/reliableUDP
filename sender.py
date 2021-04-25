@@ -1,7 +1,6 @@
 import sys
 import socket
 import time
-import pdb
 from logHandler import logHandler
 
 def fileSender():
@@ -10,21 +9,31 @@ def fileSender():
     ##########################
 
     #Write your Code here
-    logProc.startLogging("testSendLogFile.txt")
+    logProc.startLogging(f'{srcFilename}_sending_log.txt')
     PKTSIZE = 1400
-    BODYSIZE = 1300
+    MAXBODYSIZE = 1300
     windowStart = 0
     pktCnt = 0
     curSeq = 0
     ackSeq = 0
     ackDup = 0
-    isEOF = 0
+    ackNum = 0 #number of all acks
+    
+    #time variables
+    torigin = time.time()
     tstart = 0
+    rttsum = 0
+
+    #flags
+    isEOF = 0
+    isRetrans = False
     isFirst = True
     meetEnd = False
+
     buffer = [b''.join([str(curSeq).encode(), b'\n',
                             b'0', b'\n',
                             str(len(dstFilename)).encode(), b'\n',
+                            str(time.time()).encode(), b'\n',
                             dstFilename.encode()]).ljust(PKTSIZE, b'\0')]
 
 
@@ -35,30 +44,49 @@ def fileSender():
     
     while True:
         if isEOF == 1 or pktCnt >= windowSize:
+            #getting ack only if retransmission ended
+            isRetrans = False
+
+            #check the time and handle timeout
             tcur = time.time()
-            if tcur - tstart >= 1:
+
+            if ackNum > 0:
+                avgrtt = rttsum / float(ackNum)
+            else:
+                avgrtt = 1.0
+            if avgrtt < 0.1:
+                avgrtt = 0.1
+            
+            if tcur - tstart >= avgrtt:
+                logProc.writePkt(curSeq, f'timeout since {tstart-torigin:.3f}(timeout value {avgrtt:.3f})')
                 curSeq = windowStart
                 pktCnt = 0
                 isEOF = 0
-                tstart = 0
+                tstart = time.time()
+                isRetrans = True
                 continue
             
             else:
-                sock.settimeout(2-tcur+tstart)
+                sock.settimeout(avgrtt - tcur + tstart)
                 try:
                     ack, _ = sock.recvfrom(PKTSIZE)
-                    ack = ack.split(b'\n', 1)
+                    ack = ack.split(b'\n', 3)
                     ackSeq = int(ack[0].decode())
-                    ackEOF = int(ack[1].split(b'\n', 1)[0].decode())
+                    ackEOF = int(ack[1].decode())
+                    timestamp = float(ack[2].decode())
+                    rttsum += time.time() - timestamp
+                    ackNum += 1
+                    logProc.writeAck(ackSeq, f'received')
                 except:
+                    logProc.writePkt(curSeq, f'timeout since {tstart-torigin:.3f}(timeout value {avgrtt:.3f})')
                     curSeq = windowStart
                     pktCnt = 0
                     isEOF = 0
-                    tstart = 0
+                    tstart = time.time()
+                    isRetrans = True
                     continue
             
-            logProc.writeAck(1, f'ack {ackSeq} eof {ackEOF}')
-            
+            #if final ack comes, exit
             if ackEOF == 1:
                 break
 
@@ -68,10 +96,10 @@ def fileSender():
                 windowStart = ackSeq + 1
                 pktCnt -= newAcked
                 ackDup = 1
-                
+                newtstart = time.time()
+                tstart = newtstart
                 for _ in range(newAcked):
                     buffer.pop(0)
-                
 
             elif ackSeq == windowStart - 1:
                 #pdb.set_trace()
@@ -79,47 +107,50 @@ def fileSender():
             
             #if ack is redundant, set current seq to ack + 1
             if ackDup >= 3:
+                logProc.writePkt(ackSeq, '3 duplicated ACKS')
                 pktCnt = 0
                 curSeq = windowStart
                 ackDup = 0
                 isEOF = 0
                 tstart = 0
+                isRetrans = True
                 continue
 
         else:
             #fill the buffer
             if not meetEnd and not isFirst and len(buffer) < windowSize:
-                data = file.read(BODYSIZE)
-                if len(data) < BODYSIZE:
-                    logProc.writePkt(0, f'meet EOF')
+                data = file.read(MAXBODYSIZE)
+                if len(data) < MAXBODYSIZE:
                     isEOF = 1
                     meetEnd = True
-                #build data
+    
                 data = b''.join([str(curSeq).encode(), b'\n',
                             str(isEOF).encode(), b'\n',
                             str(len(data)).encode(), b'\n',
+                            str(time.time()).encode(), b'\n',
                             data]).ljust(PKTSIZE, b'\0')
-
                 buffer.append(data)
             else:
                 isFirst = False
             
+            #restart the time when not set
             if tstart == 0:
                 tstart = time.time()
 
-            #send the appropriate date in the buffer
+            #send the appropriate data in the buffer
             pkt = buffer[pktCnt]
-            test = pkt.split(b'\n', 3)
-            testSeq = int(test[0].decode())
 
             sock.sendto(pkt, (recvAddr, 10080))
-            logProc.writePkt(0, f'pkt {testSeq} send {curSeq} index {pktCnt}')
+            if isRetrans:
+                logProc.writePkt(curSeq, 'retransmitted')
+            else:
+                logProc.writePkt(curSeq, 'sent')
             isEOF = int(pkt.split(b'\n', 2)[1].decode())
             pktCnt += 1
             curSeq += 1
 
     file.close()
-    logProc.writeEnd(10.123)
+    logProc.writeEnd(curSeq / (time.time()-torigin), rttsum/float(ackNum)*1000)
     ##########################
 
 
