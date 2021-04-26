@@ -47,39 +47,36 @@ def fileReceiver():
             file = open(filename, 'wb')
             logProc.startLogging(f'{filename}_receiving_log.txt')
             curSeq += 1
-            ackSeq = curSeq
         #in-order packet accept
         elif curSeq + 1 == pktSeq:
             file.write(body)
             curSeq += 1
-            ackSeq = curSeq
-        elif curSeq < pktSeq:
-            ackSeq = curSeq
-        else:
-            ackSeq = pktSeq
+
+        ackSeq = curSeq
         
         if curSeq >= 0:
             logProc.writePkt(pktSeq, 'received')
         
-        #duplicated but end of file
-        if curSeq == pktSeq and isEOF == 1:
-            isEOF = 1
-        #duplicated or out-of-order
-        else:
-            isEOF = 0
+        if curSeq <= pktSeq:
+            #duplicated but end of file
+            if curSeq == pktSeq and isEOF == 1:
+                isEOF = 1
+            #duplicated or out-of-order
+            else:
+                isEOF = 0
 
-        #build ack
-        ack = b''.join([str(ackSeq).encode(), b'\n',
-                        str(isEOF).encode(), b'\n',
-                        str(timestamp).encode(), b'\n']).ljust(1400, b'\0')
+            #build ack
+            ack = b''.join([str(ackSeq).encode(), b'\n',
+                            str(isEOF).encode(), b'\n',
+                            str(timestamp).encode(), b'\n']).ljust(1400, b'\0')
 
-        try:
-            sock.sendto(ack, servAddr)
-            if ackSeq >= 0:
-                logProc.writeAck(ackSeq, 'sent')
-        except: #when sender socket is closed
-            file.close()
-            break
+            try:
+                sock.sendto(ack, servAddr)
+                if ackSeq >= 0:
+                    logProc.writeAck(ackSeq, 'sent')
+            except: #when sender socket is closed
+                file.close()
+                break
     
     logProc.writeEnd(curSeq / (time.time() - torigin))
     #########################
